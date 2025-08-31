@@ -71,9 +71,10 @@ async function loginAndFetchStats() {
       const name = $$(cols[0]).text().trim();
       const clicks = $$(cols[4]).text().trim();
 
-      // 嘗試從 href 抓 clientid
-      const link = $$(cols[0]).find("a").attr("href") || "";
-      const match = link.match(/clientid=(\d+)/);
+      // 嘗試從 <a> 抓 clientid
+      const anchor = $$(cols[0]).find("a").first();
+      const href = anchor.attr("href") || "";
+      const match = href.match(/clientid=(\d+)/);
       const id = match ? match[1] : "-";
 
       if (name && clicks) {
