@@ -5,18 +5,21 @@ import { CookieJar } from "tough-cookie";
 import * as cheerio from "cheerio";
 
 // ---- Polyfill for Node.js environment (GitHub Actions runner) ----
-global.File = class File extends Blob {
-  constructor(chunks, filename, options = {}) {
-    super(chunks, options);
-    this.name = filename;
-    this.lastModified = options.lastModified || Date.now();
-  }
-};
+if (typeof File === "undefined") {
+  global.File = class File extends Blob {
+    constructor(chunks, filename, options = {}) {
+      super(chunks, options);
+      this.name = filename;
+      this.lastModified = options.lastModified || Date.now();
+    }
+  };
+}
 // -----------------------------------------------------------------
 
 // 從 GitHub Actions secrets 讀取帳密 / TG token
 const REVIVE_URL = "https://revive.adgeek.net/admin/index.php";
-const REVIVE_STATS_URL = "https://revive.adgeek.net/admin/stats.php?entity=global&breakdown=advertiser&period_preset=today";
+const REVIVE_STATS_URL =
+  "https://revive.adgeek.net/admin/stats.php?entity=global&breakdown=advertiser&period_preset=today";
 
 const USER = process.env.REVIVE_USER;
 const PASS = process.env.REVIVE_PASS;
@@ -44,7 +47,7 @@ async function loginAndFetchStats() {
     }),
     {
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      maxRedirects: 0, // GitHub Actions 需要手動處理 redirect
+      maxRedirects: 0,
       validateStatus: (status) => status === 302 || status === 200,
     }
   );
@@ -60,21 +63,44 @@ async function loginAndFetchStats() {
   const statsResp = await client.get(REVIVE_STATS_URL);
   const $$ = cheerio.load(statsResp.data);
 
-  // 找出 Total 的 clicks
-  const clicks = $$("table.table tbody tr td:nth-child(5)").first().text().trim();
-  console.log("Clicks:", clicks);
+  // Step 4: 解析表格 → 名稱 + ID + Clicks
+  let advertisers = [];
+  $$("table.table tbody tr").each((i, row) => {
+    const cols = $$(row).find("td");
+    if (cols.length >= 5) {
+      const name = $$(cols[0]).text().trim();
+      const clicks = $$(cols[4]).text().trim();
 
-  // Step 4: 發送 Telegram
+      // 嘗試從 href 抓 clientid
+      const link = $$(cols[0]).find("a").attr("href") || "";
+      const match = link.match(/clientid=(\d+)/);
+      const id = match ? match[1] : "-";
+
+      if (name && clicks) {
+        advertisers.push({ name, id, clicks });
+      }
+    }
+  });
+
+  console.log("Parsed advertisers:", advertisers);
+
+  // Step 5: 組成 Telegram 訊息
+  let message = `📊 Revive 今日點擊數\n\n`;
+  advertisers.forEach((ad) => {
+    message += `${ad.name} (ID: ${ad.id}) → ${ad.clicks}\n`;
+  });
+
+  // Step 6: 發送 Telegram
   if (TG_TOKEN && TG_CHAT_ID) {
     await axios.post(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
       chat_id: TG_CHAT_ID,
-      text: `📊 Revive 今日點擊數: ${clicks}`,
+      text: message,
     });
-    console.log("Sent to Telegram!");
+    console.log("✅ Sent to Telegram!");
   }
 }
 
 loginAndFetchStats().catch((err) => {
-  console.error("Error:", err);
+  console.error("❌ Error:", err);
   process.exit(1);
 });
