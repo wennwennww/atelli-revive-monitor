@@ -3,84 +3,111 @@ import { wrapper } from "axios-cookiejar-support";
 import { CookieJar } from "tough-cookie";
 import * as cheerio from "cheerio";
 
-// 帳號密碼從環境變數讀取
+// Debug: 捕捉所有未處理的錯誤
+process.on("unhandledRejection", (err) => {
+  console.error("❌ Unhandled Rejection:", err);
+  process.exit(1);
+});
+process.on("uncaughtException", (err) => {
+  console.error("❌ Uncaught Exception:", err);
+  process.exit(1);
+});
+
+// 環境變數
+const REVIVE_URL = "https://revive.adgeek.net/admin";
 const USERNAME = process.env.REVIVE_USER;
 const PASSWORD = process.env.REVIVE_PASS;
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const TELEGRAM_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
+
+if (!USERNAME || !PASSWORD || !TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID) {
+  console.error("❌ Missing environment variables");
+  process.exit(1);
+}
 
 const jar = new CookieJar();
 const client = wrapper(axios.create({ jar, withCredentials: true }));
 
-// 1. 取得 login 頁 token
-async function getLoginToken() {
-  const res = await client.get("https://revive.adgeek.net/admin/index.php");
-  const $ = cheerio.load(res.data);
-  return $("input[name=oa_cookiecheck]").val();
-}
+async function run() {
+  console.log("STEP 1: 取得登入頁面…");
+  const loginPage = await client.get(`${REVIVE_URL}/index.php`);
+  const $ = cheerio.load(loginPage.data);
+  const token = $("input[name=oa_cookiecheck]").val();
 
-// 2. 登入
-async function login(token) {
-  const formData = new URLSearchParams();
-  formData.append("username", USERNAME);
-  formData.append("password", PASSWORD);
-  formData.append("oa_cookiecheck", token);
-  formData.append("login", "Login");
-
-  await client.post(
-    "https://revive.adgeek.net/admin/index.php",
-    formData.toString(),
-    { headers: { "Content-Type": "application/x-www-form-urlencoded" }, maxRedirects: 5 }
-  );
-}
-
-// 3. 抓取 stats 頁面
-async function fetchStats() {
-  const res = await client.get(
-    "https://revive.adgeek.net/admin/stats.php?entity=global&breakdown=advertiser&period_preset=today"
-  );
-  return res.data;
-}
-
-// 4. 解析 clicks
-function extractClicks(html) {
-  const $ = cheerio.load(html);
-
-  const totalClicks = $("table.table tbody tr:first-child td:nth-child(5)").text().trim();
-  const advertisers = [];
-  $("table.table tbody tr").each((i, el) => {
-    const name = $(el).find("td:first").text().trim();
-    const clicks = $(el).find("td:nth-child(5)").text().trim();
-    if (name && clicks) advertisers.push({ name, clicks });
-  });
-
-  return { totalClicks, advertisers };
-}
-
-// 5. 發送 Telegram
-async function sendTelegramMessage(message) {
-  const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;
-  await axios.post(url, { chat_id: TELEGRAM_CHAT_ID, text: message, parse_mode: "Markdown" });
-}
-
-(async () => {
-  try {
-    const token = await getLoginToken();
-    await login(token);
-    const statsHtml = await fetchStats();
-    const result = extractClicks(statsHtml);
-
-    let message = `📊 *Revive 今日點擊數*\n\n`;
-    message += `總點擊數: *${result.totalClicks}*\n\n`;
-    message += `各廣告主:\n`;
-    result.advertisers.slice(0, 5).forEach(ad => {
-      message += `- ${ad.name}: ${ad.clicks}\n`;
-    });
-    if (result.advertisers.length > 5) message += `... 共 ${result.advertisers.length} 個廣告主`;
-
-    await sendTelegramMessage(message);
-    console.log("✅ 已發送 Telegram 通知");
-  } catch (err) {
-    console.error("❌ Error:", err.message);
+  if (!token) {
+    console.error("❌ 找不到 oa_cookiecheck token");
+    console.log("HTML preview:", loginPage.data.substring(0, 500));
+    process.exit(1);
   }
-})();
+
+  console.log("✅ Got token:", token);
+
+  console.log("STEP 2: 嘗試登入…");
+  const loginResp = await client.post(
+    `${REVIVE_URL}/index.php`,
+    new URLSearchParams({
+      username: USERNAME,
+      password: PASSWORD,
+      oa_cookiecheck: token,
+      login: "Login",
+    }),
+    {
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      maxRedirects: 0, // Revive login 會 302 redirect
+      validateStatus: (s) => s < 500,
+    }
+  );
+
+  if (loginResp.status !== 302 && !loginResp.headers["set-cookie"]) {
+    console.error("❌ 登入失敗，收到的內容:");
+    console.log(loginResp.data.substring(0, 500));
+    process.exit(1);
+  }
+
+  console.log("✅ Login success, cookies stored.");
+
+  console.log("STEP 3: 抓取 stats 頁面…");
+  const statsResp = await client.get(
+    `${REVIVE_URL}/stats.php?entity=global&breakdown=advertiser&period_preset=today`
+  );
+  const $stats = cheerio.load(statsResp.data);
+
+  // 找 "Total" 那行的 Clicks
+  const clicks = $stats("table.table tbody tr td")
+    .filter((i, el) => $stats(el).text().trim() === "Total")
+    .parent()
+    .find("td")
+    .eq(4)
+    .text()
+    .trim();
+
+  if (!clicks) {
+    console.error("❌ 沒有抓到 Clicks 數字");
+    console.log("HTML preview:", statsResp.data.substring(0, 500));
+    process.exit(1);
+  }
+
+  console.log("✅ Clicks:", clicks);
+
+  console.log("STEP 4: 發送 Telegram 通知…");
+  const msg = `📊 Revive 今日 Clicks: ${clicks}`;
+  const tgResp = await axios.post(
+    `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage`,
+    {
+      chat_id: TELEGRAM_CHAT_ID,
+      text: msg,
+    }
+  );
+
+  if (!tgResp.data.ok) {
+    console.error("❌ Telegram 發送失敗:", tgResp.data);
+    process.exit(1);
+  }
+
+  console.log("✅ 已通知 Telegram:", msg);
+}
+
+run().catch((err) => {
+  console.error("❌ Fatal error:", err);
+  process.exit(1);
+});
