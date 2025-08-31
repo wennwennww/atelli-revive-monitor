@@ -2,19 +2,27 @@ name: Revive Stats Notifier
 
 on:
   schedule:
-    - cron: "*/30 * * * *"   # 每半小時
-  workflow_dispatch:         # 可以手動觸發
+    - cron: "*/30 * * * *" # 每半小時跑一次
+  workflow_dispatch: # 允許手動觸發
 
 jobs:
-  run:
+  build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-node@v3
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v3
         with:
-          node-version: 18
-      - run: npm install
-      - run: npm start
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run notifier script
+        run: node index.js
         env:
           REVIVE_USER: ${{ secrets.REVIVE_USER }}
           REVIVE_PASS: ${{ secrets.REVIVE_PASS }}
