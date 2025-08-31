@@ -71,8 +71,8 @@ async function loginAndFetchStats() {
       const name = $$(cols[0]).text().trim();
       const clicks = $$(cols[4]).text().trim();
 
-      // 嘗試從 <a> 抓 clientid
-      const anchor = $$(cols[0]).find("a").first();
+      // 嘗試從含有 clientid 的 <a> 抓 ID
+      const anchor = $$(cols[0]).find("a[href*='clientid=']").first();
       const href = anchor.attr("href") || "";
       const match = href.match(/clientid=(\d+)/);
       const id = match ? match[1] : "-";
