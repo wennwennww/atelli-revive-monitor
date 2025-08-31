@@ -1,0 +1,14 @@
+{
+  "name": "revive-stats-bot",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.8",
+    "axios-cookiejar-support": "^4.0.3",
+    "cheerio": "^1.0.0-rc.12",
+    "tough-cookie": "^4.1.3"
+  }
+}

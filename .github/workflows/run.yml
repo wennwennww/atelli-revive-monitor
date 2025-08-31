@@ -1,0 +1,22 @@
+name: Revive Stats Notifier
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"   # 每半小時
+  workflow_dispatch:         # 可以手動觸發
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: 18
+      - run: npm install
+      - run: npm start
+        env:
+          REVIVE_USER: ${{ secrets.REVIVE_USER }}
+          REVIVE_PASS: ${{ secrets.REVIVE_PASS }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
