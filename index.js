@@ -3,8 +3,9 @@ import axios from "axios";
 import { wrapper } from "axios-cookiejar-support";
 import { CookieJar } from "tough-cookie";
 import * as cheerio from "cheerio";
+import dayjs from "dayjs";
 
-// ---- Polyfill for Node.js environment (GitHub Actions runner) ----
+// Polyfill for File in Node.js
 if (typeof File === "undefined") {
   global.File = class File extends Blob {
     constructor(chunks, filename, options = {}) {
@@ -14,13 +15,8 @@ if (typeof File === "undefined") {
     }
   };
 }
-// -----------------------------------------------------------------
 
-// 從 GitHub Actions secrets 讀取帳密 / TG token
 const REVIVE_URL = "https://revive.adgeek.net/admin/index.php";
-const REVIVE_STATS_URL =
-  "https://revive.adgeek.net/admin/stats.php?entity=global&breakdown=advertiser&period_preset=today";
-
 const USER = process.env.REVIVE_USER;
 const PASS = process.env.REVIVE_PASS;
 const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -30,13 +26,12 @@ async function loginAndFetchStats() {
   const jar = new CookieJar();
   const client = wrapper(axios.create({ jar, withCredentials: true }));
 
-  // Step 1: 取得 login 頁面
+  // Step 1: login page
   const loginPage = await client.get(REVIVE_URL);
   const $ = cheerio.load(loginPage.data);
   const token = $("input[name=oa_cookiecheck]").attr("value");
-  console.log("Got token:", token);
 
-  // Step 2: 登入
+  // Step 2: login
   const loginResp = await client.post(
     REVIVE_URL,
     new URLSearchParams({
@@ -52,18 +47,35 @@ async function loginAndFetchStats() {
     }
   );
 
-  if (loginResp.status === 302) {
-    console.log("Login success, cookies stored.");
-  } else {
-    console.error("Login failed");
+  if (loginResp.status !== 302) {
+    console.error("❌ Login failed");
     return;
   }
+  console.log("✅ Login success");
 
-  // Step 3: 抓 stats 頁面
-  const statsResp = await client.get(REVIVE_STATS_URL);
+  // Step 3: decide period (yesterday or today)
+  const now = dayjs();
+  let periodStart, periodEnd, label;
+
+  if (now.hour() < 1) {
+    // 00:00–00:59 → yesterday
+    periodStart = dayjs().subtract(1, "day").format("YYYY-MM-DD");
+    periodEnd = periodStart;
+    label = "昨日";
+  } else {
+    // 01:00–23:59 → today
+    periodStart = now.format("YYYY-MM-DD");
+    periodEnd = periodStart;
+    label = "今日";
+  }
+
+  console.log(`⏰ 抓取期間: ${periodStart} ~ ${periodEnd} (${label})`);
+
+  const statsUrl = `https://revive.adgeek.net/admin/stats.php?entity=global&breakdown=advertiser&period_start=${periodStart}&period_end=${periodEnd}`;
+  const statsResp = await client.get(statsUrl);
   const $$ = cheerio.load(statsResp.data);
 
-  // Step 4: 解析表格 → 名稱 + ID + Clicks
+  // Step 4: parse table
   let advertisers = [];
   $$("table.table tbody tr").each((i, row) => {
     const cols = $$(row).find("td");
@@ -71,27 +83,30 @@ async function loginAndFetchStats() {
       const name = $$(cols[0]).text().trim();
       const clicks = $$(cols[4]).text().trim();
 
-      // 嘗試從含有 clientid 的 <a> 抓 ID
       const anchor = $$(cols[0]).find("a[href*='clientid=']").first();
       const href = anchor.attr("href") || "";
       const match = href.match(/clientid=(\d+)/);
       const id = match ? match[1] : "-";
 
       if (name && clicks) {
-        advertisers.push({ name, id, clicks });
+        advertisers.push({ name, id, clicks: parseInt(clicks.replace(/,/g, ""), 10) });
       }
     }
   });
 
   console.log("Parsed advertisers:", advertisers);
 
-  // Step 5: 組成 Telegram 訊息
-  let message = `📊 Revive 今日點擊數\n\n`;
+  // Step 5: total clicks
+  const totalClicks = advertisers.reduce((sum, a) => sum + (a.clicks || 0), 0);
+
+  // Step 6: build Telegram message
+  let message = `📊 Revive 點擊數 (${label} ${periodStart})\n\n`;
   advertisers.forEach((ad) => {
     message += `${ad.name} (ID: ${ad.id}) → ${ad.clicks}\n`;
   });
+  message += `\n🔢 總點擊數: ${totalClicks}`;
 
-  // Step 6: 發送 Telegram
+  // Step 7: send to Telegram
   if (TG_TOKEN && TG_CHAT_ID) {
     await axios.post(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
       chat_id: TG_CHAT_ID,
