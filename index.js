@@ -97,7 +97,6 @@ async function loginAndFetchStats() {
   advertisers.forEach((ad) => {
     message += `${ad.name} (ID: ${ad.id}) → ${ad.clicks}\n`;
   });
-  message += `\n🔢 總點擊數: ${totalClicks}`;
 
   // Step 7: send to Telegram
   if (TG_TOKEN && TG_CHAT_ID) {
