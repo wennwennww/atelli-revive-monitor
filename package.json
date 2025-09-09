@@ -9,6 +9,7 @@
     "axios": "^1.6.8",
     "axios-cookiejar-support": "^4.0.3",
     "cheerio": "^1.0.0-rc.12",
+    "dayjs": "^1.11.18",
     "googleapis": "^159.0.0",
     "tough-cookie": "^4.1.3"
   }
