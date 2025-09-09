@@ -5,17 +5,6 @@ import { CookieJar } from "tough-cookie";
 import * as cheerio from "cheerio";
 import dayjs from "dayjs";
 
-// Polyfill for File in Node.js
-if (typeof File === "undefined") {
-  global.File = class File extends Blob {
-    constructor(chunks, filename, options = {}) {
-      super(chunks, options);
-      this.name = filename;
-      this.lastModified = options.lastModified || Date.now();
-    }
-  };
-}
-
 const REVIVE_URL = "https://revive.adgeek.net/admin/index.php";
 const USER = process.env.REVIVE_USER;
 const PASS = process.env.REVIVE_PASS;
@@ -89,7 +78,11 @@ async function loginAndFetchStats() {
       const id = match ? match[1] : "-";
 
       if (name && clicks) {
-        advertisers.push({ name, id, clicks: parseInt(clicks.replace(/,/g, ""), 10) });
+        advertisers.push({
+          name,
+          id,
+          clicks: parseInt(clicks.replace(/,/g, ""), 10),
+        });
       }
     }
   });
